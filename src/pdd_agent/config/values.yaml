@@ -1,0 +1,95 @@
+# Default configuration of the PDD test case generation agent (test-agent).
+#
+# This file is embedded in the package and is the single source of defaults.
+# Run the service with one or more `--config <file>` options to override values:
+# files are deep-merged in order (maps merge, scalars and lists replace) on top of
+# these defaults. Durations use the Go style: 500ms, 10s, 1m30s, 24h.
+# Keys marked "required" have no usable default and must be provided.
+
+server:
+  # Address the HTTP server binds to, as host:port.
+  listenAddr: "0.0.0.0:8000"
+  # One of: debug, info, warn, error.
+  logLevel: info
+
+pdd:
+  # required. Secret the PDD backend signs login JWTs with. Must be the same
+  # value that git-gateway uses (`pdd.jwtSecret` in its configuration).
+  jwtSecret: ""
+  backend:
+    # Base URL of the PDD backend, used to check project membership (GET /project/).
+    url: "https://pdd-backend:5005"
+    # Skip TLS verification of the backend (it ships with a self-signed certificate).
+    insecureTLS: false
+    # Timeout of one backend request.
+    timeout: 10s
+    # How long a membership lookup of one login token is reused.
+    cacheTTL: 30s
+
+gitGateway:
+  # Base URL of the git-gateway service. The agent reads pull request data,
+  # trees and file contents only through its internal API.
+  url: "http://pdd-git-gateway:8080"
+  # required. Shared secret sent as X-Internal-Token; must equal
+  # `security.internalToken` of git-gateway.
+  internalToken: ""
+
+llm:
+  # Language model provider. The only supported value is google_genai (Google AI Studio).
+  provider: google_genai
+  # Model used for generation. Must be a model that is available to your API key (for
+  # google_genai: in Google AI Studio); when the provider reports the model as unavailable,
+  # jobs fail with `model_unavailable`.
+  model: gemini-3.8-flash
+  # required. API key of the provider (google_genai: https://aistudio.google.com/apikey).
+  apiKey: ""
+  # Base URL of the provider API. Empty selects the official URL of the provider
+  # (google_genai: https://generativelanguage.googleapis.com).
+  baseURL: ""
+  # Timeout of one generation request.
+  requestTimeout: 120s
+
+# Gemini usage control. Every request to Gemini goes through these limits.
+#
+# The free tier limits of the Gemini API are shown per project in Google AI Studio
+# (https://aistudio.google.com/rate-limit); the public documentation
+# (https://ai.google.dev/gemini-api/docs/rate-limits, checked 2026-10-24) lists no figure for
+# gemini-3.8-flash and only states that "Requests per day (RPD) quotas reset at midnight Pacific
+# time". Because the real limits could not be verified, the defaults below are conservative
+# (8 per minute, 200 per day). Read your own limits in AI Studio and set these two values to
+# about 80% of them.
+limits:
+  # Maximum Gemini requests started within any 60 seconds (retries count). A job that
+  # would exceed it waits in the queue until a slot is free.
+  requestsPerMinute: 8
+  # Maximum Gemini requests per day (retries count). The counter is persisted and resets at
+  # midnight Pacific time. When it is used up, new jobs are rejected with 429 quota_exhausted.
+  requestsPerDay: 200
+  # Total attempts for one generation, first try included, on 429, 5xx and network errors.
+  maxAttempts: 3
+  # Backoff before retry n is a random value between zero and min(maxDelay, baseDelay * 2^(n-1))
+  # (exponential backoff with full jitter). A Retry-After header from Gemini replaces it.
+  baseDelay: 1s
+  maxDelay: 30s
+  # A Retry-After longer than this is not waited for; the job fails instead.
+  maxRetryAfter: 60s
+  # An identical request (same repository, head commit, paths and model) within this window
+  # reuses the previous successful result instead of calling Gemini.
+  reuseWindow: 24h
+
+# Budget of the prompt context built from the pull request.
+context:
+  # Maximum characters of all context parts together (diff and files).
+  maxChars: 200000
+  # Maximum number of files included as context.
+  maxFiles: 40
+  # Maximum characters of a single file or of the diff of a single file.
+  maxFileChars: 40000
+
+jobs:
+  # Number of generation jobs processed at the same time.
+  concurrency: 2
+
+storage:
+  # Directory of the SQLite database (test-agent.db). Created when missing.
+  dataDir: /data
