@@ -5,7 +5,10 @@ import pytest
 
 from pdd_agent.config import ConfigError, deep_merge, load_settings, parse_duration
 
-REQUIRED = "pdd: {jwtSecret: s}\ngitGateway: {internalToken: t}\nllm: {apiKey: k}\n"
+REQUIRED = (
+    "pdd: {jwtSecret: s}\ngitGateway: {internalToken: t}\nllm: {apiKey: k}\n"
+    "sandbox: {internalToken: st}\n"
+)
 
 
 def write(tmp_path: Path, name: str, text: str) -> Path:
@@ -21,6 +24,7 @@ def test_defaults_report_all_missing_required_values_together():
         "pdd.jwtSecret: required",
         "gitGateway.internalToken: required",
         "llm.apiKey: required",
+        "sandbox.internalToken: required when sandbox.enabled is true",
     ]
 
 
@@ -122,3 +126,38 @@ def test_old_gemini_section_is_reported_as_moved(tmp_path):
     assert err.value.errors == [
         "gemini: moved to llm (provider: google_genai, model, apiKey, baseURL, requestTimeout)"
     ]
+
+
+def test_sandbox_defaults(tmp_path):
+    sandbox = load_settings([write(tmp_path, "a.yaml", REQUIRED)]).sandbox
+    assert sandbox.enabled is True
+    assert sandbox.controller_url == "http://pdd-sandbox-controller:8080"
+    assert sandbox.max_tries == 5
+    assert sandbox.poll_interval == timedelta(seconds=2)
+    assert sandbox.run_timeout == timedelta(minutes=15)
+
+
+def test_sandbox_token_is_optional_when_disabled(tmp_path):
+    text = "pdd: {jwtSecret: s}\ngitGateway: {internalToken: t}\nllm: {apiKey: k}\n"
+    settings = load_settings([write(tmp_path, "a.yaml", text + "sandbox: {enabled: false}\n")])
+    assert settings.sandbox.enabled is False and settings.sandbox.internal_token == ""
+
+
+def test_sandbox_values_are_validated(tmp_path):
+    bad = write(
+        tmp_path,
+        "bad.yaml",
+        REQUIRED
+        + "sandbox: {controllerURL: ftp, maxTries: 0, pollInterval: 0s, runTimeout: 1d, x: 1}\n",
+    )
+    with pytest.raises(ConfigError) as err:
+        load_settings([bad])
+    errors = "\n".join(err.value.errors)
+    for expected in (
+        "sandbox.controllerURL: must be an http(s) URL",
+        "sandbox.maxTries: must be greater than zero",
+        "sandbox.pollInterval: must be greater than zero",
+        "sandbox.runTimeout: invalid duration",
+        "sandbox.x: unknown key",
+    ):
+        assert expected in errors

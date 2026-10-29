@@ -9,16 +9,20 @@ from pathlib import Path
 
 import httpx
 
+from pdd_agent.agents.sandbox_fix import FixPolicy, SandboxFixAgent
 from pdd_agent.agents.testgen import ContextBudget, GenerationAgent
 from pdd_agent.config import Settings
 from pdd_agent.integrations.git_gateway import GitGatewayClient
 from pdd_agent.integrations.pdd_backend import Membership
+from pdd_agent.integrations.sandbox_controller import SandboxControllerClient
 from pdd_agent.llm.registry import create_client
 from pdd_agent.llm.usage import ManagedLlmClient, RateLimiter
+from pdd_agent.ports.llm import LlmClient
 from pdd_agent.service.execution import JobExecutor
 from pdd_agent.service.jobs import JobService
+from pdd_agent.service.sandbox import SandboxExecutor
 from pdd_agent.service.worker import JobRunner
-from pdd_agent.storage import Database, JobRepository, UsageRepository
+from pdd_agent.storage import Database, JobRepository, SandboxTryRepository, UsageRepository
 
 DB_FILE = "test-agent.db"
 
@@ -58,7 +62,11 @@ async def open_services(settings: Settings) -> AsyncIterator[Services]:
         settings.pdd.backend.url,
         settings.pdd.backend.cache_ttl.total_seconds(),
     )
-    executor = JobExecutor(store, agent)
+    sandbox_http = httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5))
+    sandbox = None
+    if settings.sandbox.enabled:
+        sandbox = _sandbox_executor(settings, sandbox_http, llm, store, SandboxTryRepository(db))
+    executor = JobExecutor(store, agent, sandbox)
     runner = JobRunner(executor, settings.jobs.concurrency)
     runner.start()
     try:
@@ -67,6 +75,23 @@ async def open_services(settings: Settings) -> AsyncIterator[Services]:
         )
     finally:
         await runner.stop()
-        for client in (backend_http, gateway_http, llm_http):
+        for client in (backend_http, gateway_http, llm_http, sandbox_http):
             await client.aclose()
         db.close()
+
+
+def _sandbox_executor(
+    settings: Settings,
+    http: httpx.AsyncClient,
+    llm: LlmClient,
+    jobs: JobRepository,
+    tries: SandboxTryRepository,
+) -> SandboxExecutor:
+    config = settings.sandbox
+    runner = SandboxControllerClient(http, config.controller_url, config.internal_token)
+    policy = FixPolicy(
+        config.max_tries,
+        config.poll_interval.total_seconds(),
+        config.run_timeout.total_seconds(),
+    )
+    return SandboxExecutor(jobs, tries, SandboxFixAgent(runner, llm, policy))

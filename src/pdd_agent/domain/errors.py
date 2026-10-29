@@ -111,3 +111,14 @@ class QuotaExhaustedError(DomainError):
         self.retry_after = max(int(reset_at - now) + 1, 1)
         reset = to_iso(datetime.fromtimestamp(reset_at, UTC))
         super().__init__(f"daily Gemini quota is used up, it resets at {reset}")
+
+
+class SandboxError(DomainError):
+    """The sandbox-controller could not serve a request.
+
+    ``code`` is a sandbox reason: ``sandbox_unavailable`` when the controller cannot be
+    reached or reports a failing service, ``internal`` for anything unexpected.
+    """
+
+    def __init__(self, message: str, code: str = "internal") -> None:
+        super().__init__(message, code)

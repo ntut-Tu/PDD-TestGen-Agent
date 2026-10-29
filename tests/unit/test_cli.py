@@ -16,6 +16,7 @@ def test_serves_with_configured_address(tmp_path, monkeypatch):
     config = tmp_path / "v.yaml"
     config.write_text(
         "pdd: {jwtSecret: s}\ngitGateway: {internalToken: t}\nllm: {apiKey: k}\n"
+        "sandbox: {internalToken: st}\n"
         "server: {listenAddr: '127.0.0.1:9123', logLevel: warn}\n"
         f"storage: {{dataDir: {tmp_path}}}\n"
     )

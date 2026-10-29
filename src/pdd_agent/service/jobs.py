@@ -79,9 +79,10 @@ class JobService:
         )
         key = reuse_key(job, self._settings.llm)
         window_start = to_iso(moment - self._settings.limits.reuse_window)
-        previous = self._store.find_reusable(key, window_start)
+        sandboxed = self._settings.sandbox.enabled
+        previous = self._store.find_reusable(key, window_start, sandboxed)
         if previous is not None and previous.result is not None:
-            job = reused(job, previous)
+            job = reused(job, previous, sandboxed)
         else:
             self._limiter.ensure_daily_quota()
         self._store.insert(job, key)

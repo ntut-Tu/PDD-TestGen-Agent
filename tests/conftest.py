@@ -120,6 +120,7 @@ pdd: {{jwtSecret: {SECRET}, backend: {{url: "{BACKEND}"}}}}
 gitGateway: {{url: "{GATEWAY}", internalToken: internal}}
 llm: {{apiKey: key, baseURL: "{GEMINI}"}}
 storage: {{dataDir: {tmp_path / "data"}}}
+sandbox: {{enabled: false}}
 """
     )
     return load_settings([config])

@@ -32,4 +32,15 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX gemini_usage_by_time ON gemini_usage (requested_at);
     """,
+    """
+    CREATE TABLE sandbox_tries (
+        job_id TEXT NOT NULL,
+        try_number INTEGER NOT NULL,
+        run_id TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        reason TEXT,
+        summary TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (job_id, try_number)
+    );
+    """,
 ]

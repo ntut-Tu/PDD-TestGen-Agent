@@ -26,13 +26,15 @@ One service in layers. The HTTP backend and the agents are separate packages, so
 
 ```text
 src/pdd_agent/
-├─ domain/         jobs.py, errors.py (+ quota, time helpers): pure data and rules, no HTTP status
-├─ agents/         base.py (Agent protocol); testgen/ = US-002: agent, selection, context, prompt, javacheck
-├─ ports/          source.py (SourceRepository), llm.py (LlmClient, LlmPrompt, LlmUsage)
+├─ domain/         jobs.py, sandbox.py (SandboxRun), errors.py (+ quota, time helpers): pure data and rules, no HTTP status
+├─ agents/         base.py (Agent protocol); testgen/ = US-002: agent, selection, context, prompt, javacheck;
+│                  sandbox_fix/ = US-003: run generated tests in the sandbox, let the model fix them
+├─ ports/          source.py (SourceRepository), llm.py (LlmClient, LlmPrompt, LlmUsage), sandbox.py (SandboxRunner)
 ├─ llm/            registry.py, google_genai.py, usage/ (rate limiter, retry wrapper implementing LlmClient)
-├─ integrations/   git_gateway.py (implements SourceRepository), pdd_backend.py (project membership)
-├─ storage/        SQLite: db.py, migrations.py, jobs.py and usage.py repositories
-├─ service/        job use cases, authorization, quota, reuse, execution, worker pool, wiring (container.py)
+├─ integrations/   git_gateway.py (implements SourceRepository), pdd_backend.py (project membership),
+│                  sandbox_controller.py (implements SandboxRunner)
+├─ storage/        SQLite: db.py, migrations.py, jobs.py, sandbox.py (tries) and usage.py repositories
+├─ service/        job use cases, authorization, quota, reuse, execution, sandbox.py (loop + tries), worker pool, wiring (container.py)
 ├─ api/            FastAPI app factory, routes, schemas, JWT auth, error -> HTTP mapping
 ├─ config/         schema.py, loader.py, values.yaml
 └─ cli.py, __main__.py
@@ -46,6 +48,31 @@ them to HTTP statuses. `uv run lint-imports` enforces this with the contracts in
 
 Tests mirror the layers: `tests/unit/<layer>/`, HTTP flows in `tests/api/`. The testgen agent is
 tested end to end with in-memory fakes of its ports (`tests/unit/agents/testgen/test_agent.py`).
+
+### Sandbox fix loop (US-003)
+
+`agents/sandbox_fix/` runs the generated tests and repairs them. It sees only the `SandboxRunner`
+port (`integrations/sandbox_controller.py` implements it against the sandbox-controller internal API,
+[ADR 0003](../docs/adr/0003-sandbox-architecture.md)) and the `LlmClient` port, so fix requests pass
+the NFR-001 limiter, retry and quota. `service/sandbox.py` runs it in the job worker after a
+generation job succeeded (when `sandbox.enabled`), stores every try in `sandbox_tries` and keeps
+`job.result.files` at the latest content. The agent reuses `testgen.javacheck` for path and syntax
+checks of the model's fixes.
+
+Per try: submit a run (files, FQCN test classes), poll every `pollInterval` until it is terminal
+(`runTimeout` overall), then `Succeeded` ends with `success`; `Error` ends with its reason; `Failed`
+with tries left sends the failure (reason, shortened output, per-class counts, test files,
+production context) to the model, which answers `{"verdict": "fix"|"production_bug", "reason",
+"files"}`. Only `.java` files under `src/test/` that parse are accepted. After `maxTries` failed tries
+the result is `fail` / `max_tries`; `production_bug` carries the model's reason; an unusable model
+answer counts as a try without a new run (stored with phase `Rejected` and the previous run id): the
+model is asked again at once, the prompt says why it was rejected, and when the tries run out the
+`max_tries` message carries the last problem. A quota that runs out mid-loop and loop crashes end as
+`fail` / `internal`. The generation job
+stays `succeeded`; the job gets `sandbox: {status: running|success|fail, reason, message, tries}`
+(`null` when disabled). Jobs found with a running sandbox after a restart end as `fail` / `internal`.
+A new identical request reuses a previous job only when its sandbox result is settled and not a
+transient failure.
 
 ### Adding an agent
 
@@ -92,6 +119,11 @@ variables. Durations are written `500ms`, `10s`, `1m30s`, `24h`.
 | `context.maxFiles` | `40` | Maximum number of context files |
 | `context.maxFileChars` | `40000` | Maximum characters of a file or of one file's diff |
 | `jobs.concurrency` | `2` | Jobs processed at the same time |
+| `sandbox.enabled` | `true` | Run generated tests in the sandbox after generation |
+| `sandbox.controllerURL` | `http://pdd-sandbox-controller:8080` | sandbox-controller base URL |
+| `sandbox.internalToken` | required when enabled | Equals `security.internalToken` of the sandbox-controller |
+| `sandbox.maxTries` | `5` | Tries in total, first run included |
+| `sandbox.pollInterval` / `sandbox.runTimeout` | `2s` / `15m` | Poll interval and longest wait for one run |
 | `storage.dataDir` | `/data` | Directory of `test-agent.db` (SQLite) |
 
 ## HTTP API
@@ -127,9 +159,13 @@ A job moves `queued` -> `running` -> `succeeded` | `failed` and has this shape:
   "context": {"productionPaths": [], "testPaths": [], "includedFiles": [], "omittedFiles": [], "truncated": false},
   "result": {"files": [{"path": "", "content": "", "syntaxValid": true, "syntaxError": null}],
              "model": "gemini-3.8-flash", "usage": {"promptTokens": 0, "outputTokens": 0}, "reused": false},
-  "error": null
+  "error": null,
+  "sandbox": {"status": "success", "reason": null, "message": "", "tries": 1}
 }
 ```
+
+`sandbox.status` is `running`, `success` or `fail`; `reason` (on `fail`) is `max_tries`, `production_bug`,
+`sandbox_unavailable`, `unsupported_project`, `source_unavailable` or `internal`.
 
 Failed jobs carry `error.code`: `gateway_failed`, `gemini_failed`, `model_unavailable`, `invalid_response`,
 `output_truncated`, `rate_limited`, `quota_exhausted`, `pull_changed`, `interrupted`, `internal` and the 422 codes above.

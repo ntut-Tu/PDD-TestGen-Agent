@@ -6,6 +6,7 @@ from pdd_agent.config.schema import (
     ContextConfig,
     LimitsConfig,
     LlmConfig,
+    SandboxConfig,
     Settings,
 )
 
@@ -15,6 +16,7 @@ __all__ = [
     "ContextConfig",
     "LimitsConfig",
     "LlmConfig",
+    "SandboxConfig",
     "Settings",
     "deep_merge",
     "load_settings",

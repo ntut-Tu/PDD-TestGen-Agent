@@ -90,6 +90,27 @@ jobs:
   # Number of generation jobs processed at the same time.
   concurrency: 2
 
+# Sandbox fix loop (US-003). After a generation job succeeds, the generated tests are
+# compiled and run in a gVisor sandbox by the sandbox-controller; on failure the model fixes
+# the tests (never production code) and the run is repeated. Every fix request is a model
+# request and counts against the `limits` above.
+sandbox:
+  # Run the generated tests in the sandbox. When false, jobs finish after generation and
+  # their `sandbox` field is null.
+  enabled: true
+  # Base URL of the sandbox-controller internal API.
+  controllerURL: "http://pdd-sandbox-controller:8080"
+  # required when enabled. Shared secret sent as X-Internal-Token; must equal
+  # `security.internalToken` of the sandbox-controller.
+  internalToken: ""
+  # Maximum tries in total (first run included). After the last failed try the sandbox
+  # result is `fail` with reason `max_tries`.
+  maxTries: 5
+  # How often a running sandbox run is polled.
+  pollInterval: 2s
+  # Longest time to wait for one run to finish (queueing behind other runs included).
+  runTimeout: 15m
+
 storage:
   # Directory of the SQLite database (test-agent.db). Created when missing.
   dataDir: /data

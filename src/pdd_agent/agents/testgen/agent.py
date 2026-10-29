@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from pdd_agent.agents.testgen.context import ContextBudget, FileFetcher, assemble_context
+from pdd_agent.agents.testgen.context import (
+    ContextBudget,
+    FileFetcher,
+    SourceFile,
+    assemble_context,
+)
 from pdd_agent.agents.testgen.javacheck import validate_file
 from pdd_agent.agents.testgen.prompt import build_prompt, detect_stack, parse_answer
 from pdd_agent.agents.testgen.selection import (
@@ -61,6 +66,7 @@ class GenerationOutput:
     included_files: list[str]
     omitted_files: list[str]
     truncated: bool
+    production: list[SourceFile] = field(default_factory=list)
 
 
 class GenerationAgent:
@@ -109,7 +115,9 @@ class GenerationAgent:
             model=answer.model,
             usage=usage,
         )
-        return GenerationOutput(result, bundle.included, bundle.omitted, bundle.truncated)
+        return GenerationOutput(
+            result, bundle.included, bundle.omitted, bundle.truncated, bundle.production
+        )
 
     def _fetcher(self, task: GenerationTask, ref: str) -> FileFetcher:
         async def fetch(path: str) -> RepoFile | None:

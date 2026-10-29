@@ -121,6 +121,8 @@ def parse_settings(data: Mapping[str, Any]) -> Settings:
         errors.append(_MOVED_GEMINI)
         data = {k: v for k, v in data.items() if k != "gemini"}
     settings = _build(Settings, data, "", errors)
+    if settings.sandbox.enabled and not settings.sandbox.internal_token:
+        errors.append("sandbox.internalToken: required when sandbox.enabled is true")
     if errors:
         raise ConfigError(errors)
     return settings

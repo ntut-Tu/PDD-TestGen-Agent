@@ -24,10 +24,18 @@ def reuse_key(job: Job, llm: LlmConfig) -> str:
     return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
 
 
-def reused(job: Job, previous: Job) -> Job:
-    """Complete ``job`` with the result of ``previous`` without calling the model."""
+def reused(job: Job, previous: Job, sandboxed: bool = False) -> Job:
+    """Complete ``job`` with the result of ``previous`` without calling the model.
+
+    With ``sandboxed`` the sandbox result of ``previous`` is copied as well.
+    """
     assert previous.result is not None
     result = previous.result.model_copy(update={"reused": True, "usage": Usage()})
     return job.model_copy(
-        update={"status": "succeeded", "result": result, "context": previous.context}
+        update={
+            "status": "succeeded",
+            "result": result,
+            "context": previous.context,
+            "sandbox": previous.sandbox if sandboxed else None,
+        }
     )

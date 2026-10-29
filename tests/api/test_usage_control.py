@@ -163,7 +163,10 @@ def test_retry_after_parsing():
 def test_limits_defaults_and_validation(tmp_path):
     from pdd_agent.config import ConfigError
 
-    required = "pdd: {jwtSecret: s}\ngitGateway: {internalToken: t}\nllm: {apiKey: k}\n"
+    required = (
+        "pdd: {jwtSecret: s}\ngitGateway: {internalToken: t}\nllm: {apiKey: k}\n"
+        "sandbox: {internalToken: st}\n"
+    )
     ok = tmp_path / "ok.yaml"
     ok.write_text(required)
     limits = load_settings([ok]).limits

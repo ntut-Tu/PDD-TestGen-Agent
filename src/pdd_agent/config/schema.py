@@ -129,6 +129,23 @@ class StorageConfig:
 
 
 @dataclass(frozen=True)
+class SandboxConfig:
+    """Sandbox fix loop (US-003): runs the generated tests in the sandbox-controller.
+
+    ``internal_token`` is required while ``enabled`` is true; the loader checks that.
+    """
+
+    enabled: bool = True
+    controller_url: str = _opt(
+        "http://pdd-sandbox-controller:8080", key="controllerURL", check=_url
+    )
+    internal_token: str = _opt("", key="internalToken")
+    max_tries: int = _opt(5, key="maxTries", check=_positive)
+    poll_interval: timedelta = _opt(timedelta(seconds=2), key="pollInterval", check=_positive)
+    run_timeout: timedelta = _opt(timedelta(minutes=15), key="runTimeout", check=_positive)
+
+
+@dataclass(frozen=True)
 class Settings:
     """Complete validated configuration of the agent."""
 
@@ -142,3 +159,4 @@ class Settings:
     context: ContextConfig = field(default_factory=ContextConfig)
     jobs: JobsConfig = field(default_factory=JobsConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
+    sandbox: SandboxConfig = field(default_factory=SandboxConfig)

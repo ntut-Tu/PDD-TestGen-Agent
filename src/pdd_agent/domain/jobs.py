@@ -68,6 +68,32 @@ class JobError(CamelModel):
     message: str
 
 
+SandboxStatusName = Literal["running", "success", "fail"]
+
+
+class SandboxOutcome(CamelModel):
+    """Public sandbox result of a job.
+
+    ``reason`` is set when ``status`` is ``fail``: ``max_tries``, ``production_bug``,
+    ``sandbox_unavailable``, ``unsupported_project``, ``source_unavailable`` or ``internal``.
+    """
+
+    status: SandboxStatusName
+    reason: str | None = None
+    message: str = ""
+    tries: int = 0
+
+
+class SandboxTry(CamelModel):
+    """The kept record of one sandbox try (not part of the public job)."""
+
+    number: int
+    run_id: str
+    phase: str
+    reason: str | None = None
+    summary: str = ""
+
+
 class Job(CamelModel):
     """A test generation job."""
 
@@ -80,6 +106,7 @@ class Job(CamelModel):
     context: JobContext
     result: JobResult | None = None
     error: JobError | None = None
+    sandbox: SandboxOutcome | None = None
 
 
 @dataclass(frozen=True)

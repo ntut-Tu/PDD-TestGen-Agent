@@ -30,12 +30,26 @@ class JobRepository:
             ),
         )
 
-    def find_reusable(self, reuse_key: str, created_since: str) -> Job | None:
-        """Return the newest succeeded job with real Gemini output for ``reuse_key``."""
+    def find_reusable(
+        self, reuse_key: str, created_since: str, sandboxed: bool = False
+    ) -> Job | None:
+        """Return the newest succeeded job with real Gemini output for ``reuse_key``.
+
+        With ``sandboxed`` the job must also have a settled sandbox result that is not a
+        transient failure, because the caller copies that result.
+        """
+        sandbox = (
+            " AND json_extract(data, '$.sandbox.status') IN ('success', 'fail')"
+            " AND COALESCE(json_extract(data, '$.sandbox.reason'), '') NOT IN"
+            " ('sandbox_unavailable', 'source_unavailable', 'internal')"
+            if sandboxed
+            else ""
+        )
         rows = self._db.query(
             "SELECT data FROM jobs WHERE reuse_key = ? AND status = 'succeeded'"
             " AND created_at >= ? AND json_extract(data, '$.result.reused') = 0"
-            " ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            + sandbox
+            + " ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (reuse_key, created_since),
         )
         return Job.model_validate_json(rows[0]["data"]) if rows else None
@@ -64,6 +78,14 @@ class JobRepository:
         """Return every job in ``status``, oldest first."""
         rows = self._db.query(
             "SELECT data FROM jobs WHERE status = ? ORDER BY created_at, rowid", (status,)
+        )
+        return [Job.model_validate_json(r["data"]) for r in rows]
+
+    def list_sandbox_running(self) -> list[Job]:
+        """Return the jobs whose sandbox loop was in progress, oldest first."""
+        rows = self._db.query(
+            "SELECT data FROM jobs WHERE json_extract(data, '$.sandbox.status') = 'running'"
+            " ORDER BY created_at, rowid"
         )
         return [Job.model_validate_json(r["data"]) for r in rows]
 

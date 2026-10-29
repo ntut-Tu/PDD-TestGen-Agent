@@ -6,10 +6,12 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 
+from pdd_agent.agents.sandbox_fix import ContextFile
 from pdd_agent.agents.testgen import GenerationAgent, GenerationTask
 from pdd_agent.domain.errors import DomainError
 from pdd_agent.domain.jobs import Job, JobError
 from pdd_agent.domain.timeutil import to_iso, utc_now
+from pdd_agent.service.sandbox import SandboxExecutor
 from pdd_agent.storage import JobRepository
 
 log = logging.getLogger(__name__)
@@ -22,10 +24,12 @@ class JobExecutor:
         self,
         store: JobRepository,
         agent: GenerationAgent,
+        sandbox: SandboxExecutor | None = None,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._store = store
         self._agent = agent
+        self._sandbox = sandbox
         self._clock = clock
 
     def recover(self) -> list[str]:
@@ -33,7 +37,10 @@ class JobExecutor:
 
         Queued jobs have not touched the model yet and are re-queued. Running jobs may have
         spent a model request, so they fail with ``interrupted`` and the user submits again.
+        A sandbox loop that was in progress ends as ``fail`` / ``internal``.
         """
+        if self._sandbox is not None:
+            self._sandbox.recover()
         for job in self._store.list_by_status("running"):
             self._fail(job, "interrupted", "the agent restarted while the job was running")
         return [job.id for job in self._store.list_by_status("queued")]
@@ -45,14 +52,18 @@ class JobExecutor:
             return
         job = self._save(job, status="running")
         try:
-            job = await self._generate(job)
+            job, context = await self._generate(job)
         except DomainError as exc:
             self._fail(job, exc.code, exc.message)
+            return
         except Exception:
             log.exception("job %s failed unexpectedly", job.id)
             self._fail(job, "internal", "unexpected error, see the agent log")
+            return
+        if self._sandbox is not None:
+            await self._sandbox.run(job, context)
 
-    async def _generate(self, job: Job) -> Job:
+    async def _generate(self, job: Job) -> tuple[Job, list[ContextFile]]:
         pull = job.pull
         output = await self._agent.run(
             GenerationTask(
@@ -73,7 +84,8 @@ class JobExecutor:
                 "truncated": output.truncated,
             }
         )
-        return self._save(job, status="succeeded", result=output.result, context=context)
+        saved = self._save(job, status="succeeded", result=output.result, context=context)
+        return saved, [ContextFile(f.path, f.content) for f in output.production]
 
     def _save(self, job: Job, **changes: object) -> Job:
         updated = job.model_copy(update={**changes, "updated_at": to_iso(self._clock())})
